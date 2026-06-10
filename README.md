@@ -2,11 +2,20 @@
 
 Serves resources, archives resources for MCSR
 
-ResourceQ is a localhost app, not meant to be deployed. ResourceQ is a way for me to manage my Neondb through RESTful API access to GET, PUT, POST, and DELETE resources meant for the MCSR Hub project.
+ResourceQ is a localhost app, not meant to be deployed. ResourceQ is a way for me to manage my Neondb through RESTful API access to GET, PUT, POST, and DELETE resources meant for the [MCSR Hub](https://mcsrhub.vercel.app/) project.
+
+## Features
+
+- Manage existing cards through the UI interface. This includes Adding, Editing, and Deleting existing cards with filters allowing for easy access to specific cards.
+
+- Queued cards yet to be added to the main database so planned to add.
+
 
 ## File Structure
 
 resourceq
+
+```
 |--/public
 |--/src
     |--/app
@@ -15,14 +24,20 @@ resourceq
     |--/styles
     |--/utils
 |--/tests
+```
 
 ## Tech Stack
 
 NeonDB - PostgreSQL
+
 Next.Js + Typescript
+
 Eslint + Prettier
+
 Drizzle - ORM
+
 MUI - Material UI components
+
 Jest - Testing
 
 ## Dependencies
@@ -49,7 +64,3 @@ bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [next/font](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

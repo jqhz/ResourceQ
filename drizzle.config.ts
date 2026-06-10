@@ -1,8 +1,8 @@
 import { type Config } from 'drizzle-kit';
 
 export default {
-  schema: './src/server/db/schema',
-  out: './src/server/db/migrations',
+  schema: './src/utils/db/schema.ts',
+  out: './drizzle',
   migrations: {
     prefix: 'timestamp',
   },
