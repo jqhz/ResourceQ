@@ -11,10 +11,10 @@
     "format:check": "prettier --check .",
     "format:fix": "prettier --write .",
     "test": "NODE_OPTIONS=--experimental-vm-modules dotenv jest --detectOpenHandles --forceExit",
-    "drizzle:generate": "dotenv drizzle-kit generate",
-    "auth-schema:generate": "dotenv -- npx @better-auth/cli@latest generate --output src/server/db/schema/auth.ts --config src/server/auth.ts",
-    "drizzle:migrate": "dotenv drizzle-kit migrate",
-    "drizzle:check": "dotenv drizzle-kit check"
+    "drizzle:generate": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs generate",
+    "auth-schema:generate": "node --env-file=.env npx @better-auth/cli@latest generate --output src/server/db/schema/auth.ts --config src/server/auth.ts",
+    "drizzle:migrate": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs migrate",
+    "drizzle:check": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs check"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -27,6 +27,7 @@
     "@trpc/server": "^11.17.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "fuse.js": "^7.4.2",
     "next": "^16.2.7",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
