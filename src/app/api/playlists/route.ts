@@ -1,5 +1,9 @@
 import { listPlaylists } from "@src/utils/db/cards";
-import { getAllPlaylistIds, upsertPlaylist } from "@src/utils/db/playlists";
+import {
+  getAllPlaylistIds,
+  resolvePlaylistSlug,
+  upsertPlaylist,
+} from "@src/utils/db/playlists";
 import { jsonError } from "@src/utils/api";
 import {
   normalizePlaylistInput,
@@ -28,7 +32,11 @@ export const POST = async (request: Request) => {
     if (existingIds.includes(input.id)) {
       return jsonError("Playlist id already exists.");
     }
-    await upsertPlaylist(input);
+    const { slug, error } = await resolvePlaylistSlug(input, { isCreate: true });
+    if (error) {
+      return jsonError(error);
+    }
+    await upsertPlaylist({ ...input, slug });
     return Response.json({ ok: true });
   } catch (error) {
     console.error(error);

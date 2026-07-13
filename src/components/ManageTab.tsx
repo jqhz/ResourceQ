@@ -205,6 +205,7 @@ export default function ManageTab() {
         description: playlistDraft.description?.trim() || undefined,
         parentPlaylistId: playlistDraft.parentPlaylistId || undefined,
         title: playlistDraft.title.trim(),
+        slug: playlistDraft.slug.trim(),
         image: playlistDraft.image.trim(),
       },
     };
@@ -358,6 +359,7 @@ export default function ManageTab() {
             <TableHead>
               <TableRow>
                 <TableCell>Title</TableCell>
+                <TableCell>Slug</TableCell>
                 <TableCell>ID</TableCell>
                 <TableCell>Category</TableCell>
                 <TableCell>Image</TableCell>
@@ -373,6 +375,7 @@ export default function ManageTab() {
                   onClick={() => openEditPlaylistModal(playlist)}
                 >
                   <TableCell>{playlist.title}</TableCell>
+                  <TableCell>{playlist.slug}</TableCell>
                   <TableCell>{playlist.id}</TableCell>
                   <TableCell>
                     {categoryLabel.get(playlist.category) ?? playlist.category}
@@ -403,7 +406,7 @@ export default function ManageTab() {
               ))}
               {playlists.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5}>
+                  <TableCell colSpan={6}>
                     <Typography color="text.secondary">No playlists found.</Typography>
                   </TableCell>
                 </TableRow>

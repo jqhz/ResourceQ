@@ -7,6 +7,7 @@ export interface Playlist {
   category: CategorySlug;
   parentPlaylistId?: string;
   title: string;
+  slug: string;
   image: string;
   description?: string;
 }

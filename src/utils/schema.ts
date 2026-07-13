@@ -6,6 +6,7 @@ import {
   pgEnum,
   primaryKey,
   foreignKey,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const categorySlugEnum = pgEnum("category_slug", [
@@ -33,6 +34,7 @@ export const playlists = pgTable(
       .references(() => categories.slug, { onDelete: "restrict" }),
     parentPlaylistId: text("parent_playlist_id"),
     title: text("title").notNull(),
+    slug: text("slug").notNull(),
     image: text("image").notNull(),
     description: text("description"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -45,7 +47,11 @@ export const playlists = pgTable(
       foreignColumns: [table.id],
       name: "playlists_parent_playlist_id_fkey",
     }).onDelete("cascade"),
-  ]
+    uniqueIndex("playlists_category_slug_slug_unique").on(
+      table.categorySlug,
+      table.slug,
+    ),
+  ],
 );
 
 export const cards = pgTable("cards", {

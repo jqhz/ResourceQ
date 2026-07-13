@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { categorySlugEnum } from "./schema";
+import { SLUG_PATTERN } from "./slug";
 
 const categorySlug = z.enum(categorySlugEnum.enumValues);
+
+const playlistSlug = z
+  .string()
+  .trim()
+  .regex(SLUG_PATTERN, "Slug must be lowercase letters, numbers, and dashes.");
 
 export const cardInputSchema = z.object({
   id: z.string().trim().min(1),
@@ -20,6 +26,7 @@ export const playlistInputSchema = z.object({
   category: categorySlug,
   parentPlaylistId: z.string().trim().optional(),
   title: z.string().trim().min(1),
+  slug: playlistSlug.optional(),
   image: z.string().trim().min(1),
   description: z.string().trim().optional(),
 });

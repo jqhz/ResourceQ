@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -10,11 +11,13 @@ import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import type { CategorySlug, Playlist } from "@src/utils/types";
 import { CATEGORIES } from "@src/utils/constants";
+import { SLUG_PATTERN, slugify } from "@src/utils/slug";
 
 export const emptyPlaylist = (): Playlist => ({
   id: "",
   category: "tutorials",
   title: "",
+  slug: "",
   image: "",
   description: "",
 });
@@ -44,6 +47,14 @@ export default function PlaylistModal({
   saving = false,
   deleting = false,
 }: PlaylistModalProps) {
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setSlugManuallyEdited(mode === "edit");
+    }
+  }, [open, mode]);
+
   const parentOptions = playlists.filter(
     (playlist) =>
       playlist.category === draft.category && playlist.id !== draft.id,
@@ -52,6 +63,11 @@ export default function PlaylistModal({
   const setField = <K extends keyof Playlist>(key: K, value: Playlist[K]) => {
     onChange({ ...draft, [key]: value });
   };
+
+  const slugValid = SLUG_PATTERN.test(draft.slug.trim());
+  const canSave =
+    Boolean(draft.id && draft.title && draft.image && draft.slug.trim()) &&
+    slugValid;
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -69,7 +85,29 @@ export default function PlaylistModal({
           <TextField
             label="Title"
             value={draft.title}
-            onChange={(event) => setField("title", event.target.value)}
+            onChange={(event) => {
+              const title = event.target.value;
+              if (mode === "add" && !slugManuallyEdited) {
+                onChange({ ...draft, title, slug: slugify(title) });
+                return;
+              }
+              setField("title", title);
+            }}
+            fullWidth
+          />
+          <TextField
+            label="Slug"
+            value={draft.slug}
+            onChange={(event) => {
+              setSlugManuallyEdited(true);
+              setField("slug", event.target.value);
+            }}
+            helperText={
+              draft.slug && !slugValid
+                ? "Use lowercase letters, numbers, and dashes only."
+                : "Used in public URLs for this playlist within its category."
+            }
+            error={Boolean(draft.slug && !slugValid)}
             fullWidth
           />
           <TextField
@@ -139,7 +177,7 @@ export default function PlaylistModal({
           <Button
             variant="contained"
             onClick={onSave}
-            disabled={saving || deleting || !draft.id || !draft.title || !draft.image}
+            disabled={saving || deleting || !canSave}
           >
             {mode === "add" ? "Add Playlist" : "Save Changes"}
           </Button>

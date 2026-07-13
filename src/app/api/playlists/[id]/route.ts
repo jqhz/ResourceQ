@@ -1,4 +1,8 @@
-import { deletePlaylist, upsertPlaylist } from "@src/utils/db/playlists";
+import {
+  deletePlaylist,
+  resolvePlaylistSlug,
+  upsertPlaylist,
+} from "@src/utils/db/playlists";
 import { jsonError } from "@src/utils/api";
 import {
   normalizePlaylistInput,
@@ -18,7 +22,12 @@ export const PUT = async (request: Request, context: RouteContext) => {
     if (parsed.data.id !== id) {
       return jsonError("Playlist id mismatch.");
     }
-    await upsertPlaylist(normalizePlaylistInput(parsed.data));
+    const input = normalizePlaylistInput(parsed.data);
+    const { slug, error } = await resolvePlaylistSlug(input, { isCreate: false });
+    if (error) {
+      return jsonError(error);
+    }
+    await upsertPlaylist({ ...input, slug });
     return Response.json({ ok: true });
   } catch (error) {
     console.error(error);

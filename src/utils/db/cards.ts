@@ -74,6 +74,7 @@ export const listPlaylists = async (): Promise<Playlist[]> => {
     category: row.categorySlug,
     parentPlaylistId: row.parentPlaylistId ?? undefined,
     title: row.title,
+    slug: row.slug,
     image: row.image,
     description: row.description ?? undefined,
   }));

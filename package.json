@@ -14,7 +14,8 @@
     "drizzle:generate": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs generate",
     "auth-schema:generate": "node --env-file=.env npx @better-auth/cli@latest generate --output src/server/db/schema/auth.ts --config src/server/auth.ts",
     "drizzle:migrate": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs migrate",
-    "drizzle:check": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs check"
+    "drizzle:check": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs check",
+    "backfill:playlist-slugs": "node --env-file=.env ./node_modules/tsx/dist/cli.mjs scripts/backfill-playlist-slugs.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -32,6 +33,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-hook-form": "^7.78.0",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

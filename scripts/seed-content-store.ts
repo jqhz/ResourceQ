@@ -3,6 +3,7 @@ import { db } from "../src/utils/db/index";
 import { categories, playlists, cards, cardCategories, playlistCards } from "../src/utils/schema";
 import { CATEGORIES } from "../src/utils/constants";
 import type { CategorySlug } from "../src/utils/types";
+import { slugify } from "../src/utils/slug";
 
 interface ContentStorePlaylist {
   id: string;
@@ -74,6 +75,22 @@ const main = async () => {
     .values(CATEGORIES.map((c) => ({ slug: c.slug, label: c.label })))
     .onConflictDoNothing();
 
+  const takenSlugsByCategory = new Map<CategorySlug, Set<string>>();
+
+  const uniqueSeedSlug = (category: CategorySlug, title: string) => {
+    const taken = takenSlugsByCategory.get(category) ?? new Set<string>();
+    const baseSlug = slugify(title) || "playlist";
+    let slug = baseSlug;
+    let suffix = 2;
+    while (taken.has(slug)) {
+      slug = `${baseSlug}-${suffix}`;
+      suffix += 1;
+    }
+    taken.add(slug);
+    takenSlugsByCategory.set(category, taken);
+    return slug;
+  };
+
   await db
     .insert(playlists)
     .values(
@@ -81,6 +98,7 @@ const main = async () => {
         id: p.id,
         categorySlug: p.category,
         title: p.title,
+        slug: uniqueSeedSlug(p.category, p.title),
         image: p.image,
         description: p.description,
       })),
