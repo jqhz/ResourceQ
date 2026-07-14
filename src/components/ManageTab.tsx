@@ -22,6 +22,8 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
+import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import SearchIcon from "@mui/icons-material/Search";
 import type { CardItem, Playlist } from "@src/utils/types";
 import { CATEGORIES } from "@src/utils/constants";
@@ -36,6 +38,7 @@ export default function ManageTab() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [filter, setFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [idSortOrder, setIdSortOrder] = useState<"asc" | "desc" | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"add" | "edit">("add");
   const [modalInitialCard, setModalInitialCard] = useState<CardItem>(emptyCard());
@@ -112,6 +115,21 @@ export default function ManageTab() {
     [filteredByCategory, searchQuery],
   );
 
+  const sortedDisplayedCards = useMemo(() => {
+    const nextCards = [...displayedCards];
+    if (!idSortOrder) return nextCards;
+
+    nextCards.sort((left, right) => {
+      const comparison = left.id.localeCompare(right.id, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+      return idSortOrder === "asc" ? comparison : -comparison;
+    });
+
+    return nextCards;
+  }, [displayedCards, idSortOrder]);
+
   const searchOptions = useMemo(() => {
     const trimmed = searchQuery.trim();
     if (!trimmed) return [];
@@ -162,6 +180,10 @@ export default function ManageTab() {
     () => playlists.map((playlist) => playlist.id),
     [playlists],
   );
+
+  const handleToggleIdSort = () => {
+    setIdSortOrder((current) => (current === "asc" ? "desc" : "asc"));
+  };
 
   const openAddModal = () => {
     const card = emptyCard();
@@ -499,7 +521,28 @@ export default function ManageTab() {
           <TableHead>
             <TableRow>
               <TableCell>Title</TableCell>
-              <TableCell>ID</TableCell>
+              <TableCell>
+                <Button
+                  size="small"
+                  onClick={handleToggleIdSort}
+                  sx={{
+                    minWidth: 0,
+                    px: 0,
+                    color: "inherit",
+                    justifyContent: "flex-start",
+                    textTransform: "none",
+                  }}
+                  endIcon={
+                    idSortOrder === "desc" ? (
+                      <ArrowDownwardIcon fontSize="small" />
+                    ) : idSortOrder === "asc" ? (
+                      <ArrowUpwardIcon fontSize="small" />
+                    ) : null
+                  }
+                >
+                  ID
+                </Button>
+              </TableCell>
               <TableCell>Categories</TableCell>
               <TableCell>Playlists</TableCell>
               <TableCell>URL</TableCell>
@@ -507,7 +550,7 @@ export default function ManageTab() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {displayedCards.map((card) => (
+            {sortedDisplayedCards.map((card) => (
               <TableRow
                 key={card.id}
                 hover
@@ -567,7 +610,7 @@ export default function ManageTab() {
                 </TableCell>
               </TableRow>
             ))}
-            {displayedCards.length === 0 && (
+            {sortedDisplayedCards.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6}>
                   <Typography color="text.secondary">No cards found.</Typography>
