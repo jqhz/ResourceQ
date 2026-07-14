@@ -38,7 +38,8 @@ export default function ManageTab() {
   const [searchQuery, setSearchQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"add" | "edit">("add");
-  const [draft, setDraft] = useState<CardItem>(emptyCard());
+  const [modalInitialCard, setModalInitialCard] = useState<CardItem>(emptyCard());
+  const [modalKey, setModalKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -166,7 +167,8 @@ export default function ManageTab() {
     const card = emptyCard();
     card.id = getNextIdForCategory(card.categories[0], existingIds);
     setModalMode("add");
-    setDraft(card);
+    setModalInitialCard(card);
+    setModalKey((key) => key + 1);
     setModalOpen(true);
   };
 
@@ -258,16 +260,17 @@ export default function ManageTab() {
 
   const openEditModal = (card: CardItem) => {
     setModalMode("edit");
-    setDraft({
+    setModalInitialCard({
       ...card,
       description: card.description ?? "",
       image: card.image ?? "",
       date: card.date ?? "",
     });
+    setModalKey((key) => key + 1);
     setModalOpen(true);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (draft: CardItem) => {
     setSaving(true);
     const payload = {
       card: {
@@ -299,7 +302,6 @@ export default function ManageTab() {
     }
 
     setModalOpen(false);
-    setDraft(emptyCard());
     setToast({
       open: true,
       message:
@@ -327,7 +329,6 @@ export default function ManageTab() {
     }
     setDeleteTarget(null);
     setModalOpen(false);
-    setDraft(emptyCard());
     setToast({ open: true, message: "Card deleted." });
     await fetchContent();
   };
@@ -578,16 +579,18 @@ export default function ManageTab() {
       </Box>
 
       <CardModal
+        key={modalKey}
         open={modalOpen}
         mode={modalMode}
-        draft={draft}
+        initialCard={modalInitialCard}
         playlists={playlists}
         existingIds={existingIds}
         onClose={() => setModalOpen(false)}
-        onChange={setDraft}
         onSave={handleSave}
         onDelete={
-          modalMode === "edit" ? () => requestDelete(draft) : undefined
+          modalMode === "edit"
+            ? () => requestDelete(modalInitialCard)
+            : undefined
         }
         saving={saving}
         deleting={deleting}

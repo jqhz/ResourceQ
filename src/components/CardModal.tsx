@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import Alert from "@mui/material/Alert";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -29,30 +31,41 @@ export const emptyCard = (): CardItem => ({
 interface CardModalProps {
   open: boolean;
   mode: "add" | "edit";
-  draft: CardItem;
+  initialCard: CardItem;
   playlists: Playlist[];
   existingIds: string[];
   onClose: () => void;
-  onChange: (draft: CardItem) => void;
-  onSave: () => void;
+  onSave: (card: CardItem) => void;
   onDelete?: () => void;
   saving?: boolean;
   deleting?: boolean;
 }
 
+function validateCard(card: CardItem): string | null {
+  if (!card.id.trim()) return "ID is required.";
+  if (!card.title.trim()) return "Title is required.";
+  if (!card.url.trim()) return "URL is required.";
+  if (!hasValidAssignments(card)) {
+    return "Select at least one category or playlist.";
+  }
+  return null;
+}
+
 export default function CardModal({
   open,
   mode,
-  draft,
+  initialCard,
   playlists,
   existingIds,
   onClose,
-  onChange,
   onSave,
   onDelete,
   saving = false,
   deleting = false,
 }: CardModalProps) {
+  const [draft, setDraft] = useState(initialCard);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
   const primaryCategory = derivePrimaryCategory(
     toPlacementKeys(draft.categories, draft.playlistIds),
     playlists,
@@ -71,11 +84,22 @@ export default function CardModal({
       const primary = derivePrimaryCategory(keys, playlists);
       next.id = getNextIdForCategory(primary, existingIds);
     }
-    onChange(next);
+    setDraft(next);
+    setValidationError(null);
   };
 
   const setField = <K extends keyof CardItem>(key: K, value: CardItem[K]) => {
-    onChange({ ...draft, [key]: value });
+    setDraft((current) => ({ ...current, [key]: value }));
+    setValidationError(null);
+  };
+
+  const handleSave = () => {
+    const error = validateCard(draft);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+    onSave(draft);
   };
 
   return (
@@ -83,6 +107,11 @@ export default function CardModal({
       <DialogTitle>{mode === "add" ? "Add Card to Queue" : "Edit Card"}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
+          {validationError && (
+            <Alert severity="error" onClose={() => setValidationError(null)}>
+              {validationError}
+            </Alert>
+          )}
           <TextField
             label="ID"
             value={draft.id}
@@ -154,15 +183,8 @@ export default function CardModal({
           </Button>
           <Button
             variant="contained"
-            onClick={onSave}
-            disabled={
-              saving ||
-              deleting ||
-              !draft.id ||
-              !draft.title ||
-              !draft.url ||
-              !hasValidAssignments(draft)
-            }
+            onClick={handleSave}
+            disabled={saving || deleting}
           >
             {mode === "add" ? "Add to Queue" : "Save Changes"}
           </Button>
