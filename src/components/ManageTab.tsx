@@ -613,7 +613,7 @@ export default function ManageTab() {
       </Box>
 
       <CardModal
-        key={modalKey}
+        key={`card-${modalKey}`}
         open={modalOpen}
         mode={modalMode}
         initialCard={modalInitialCard}
@@ -631,7 +631,7 @@ export default function ManageTab() {
       />
 
       <PlaylistModal
-        key={playlistModalKey}
+        key={`playlist-${playlistModalKey}`}
         open={playlistModalOpen}
         mode={playlistModalMode}
         initialPlaylist={playlistInitial}
