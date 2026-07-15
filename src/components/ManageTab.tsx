@@ -51,7 +51,8 @@ export default function ManageTab() {
   } | null>(null);
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
   const [playlistModalMode, setPlaylistModalMode] = useState<"add" | "edit">("add");
-  const [playlistDraft, setPlaylistDraft] = useState<Playlist>(emptyPlaylist());
+  const [playlistInitial, setPlaylistInitial] = useState<Playlist>(emptyPlaylist());
+  const [playlistModalKey, setPlaylistModalKey] = useState(0);
   const [playlistSaving, setPlaylistSaving] = useState(false);
   const [playlistDeleting, setPlaylistDeleting] = useState(false);
   const [deletePlaylistTarget, setDeletePlaylistTarget] = useState<{
@@ -198,30 +199,22 @@ export default function ManageTab() {
     const playlist = emptyPlaylist();
     playlist.id = getNextPlaylistId(playlist.category, existingPlaylistIds);
     setPlaylistModalMode("add");
-    setPlaylistDraft(playlist);
+    setPlaylistInitial(playlist);
+    setPlaylistModalKey((key) => key + 1);
     setPlaylistModalOpen(true);
   };
 
   const openEditPlaylistModal = (playlist: Playlist) => {
     setPlaylistModalMode("edit");
-    setPlaylistDraft({
+    setPlaylistInitial({
       ...playlist,
       description: playlist.description ?? "",
     });
+    setPlaylistModalKey((key) => key + 1);
     setPlaylistModalOpen(true);
   };
 
-  const handlePlaylistDraftChange = (next: Playlist) => {
-    if (
-      playlistModalMode === "add" &&
-      next.category !== playlistDraft.category
-    ) {
-      next.id = getNextPlaylistId(next.category, existingPlaylistIds);
-    }
-    setPlaylistDraft(next);
-  };
-
-  const handlePlaylistSave = async () => {
+  const handlePlaylistSave = async (playlistDraft: Playlist) => {
     setPlaylistSaving(true);
     const payload = {
       playlist: {
@@ -253,7 +246,6 @@ export default function ManageTab() {
       return;
     }
     setPlaylistModalOpen(false);
-    setPlaylistDraft(emptyPlaylist());
     setToast({
       open: true,
       message:
@@ -275,7 +267,6 @@ export default function ManageTab() {
     }
     setDeletePlaylistTarget(null);
     setPlaylistModalOpen(false);
-    setPlaylistDraft(emptyPlaylist());
     setToast({ open: true, message: "Playlist deleted." });
     await fetchContent();
   };
@@ -640,19 +631,20 @@ export default function ManageTab() {
       />
 
       <PlaylistModal
+        key={playlistModalKey}
         open={playlistModalOpen}
         mode={playlistModalMode}
-        draft={playlistDraft}
+        initialPlaylist={playlistInitial}
         playlists={playlists}
+        existingPlaylistIds={existingPlaylistIds}
         onClose={() => setPlaylistModalOpen(false)}
-        onChange={handlePlaylistDraftChange}
         onSave={handlePlaylistSave}
         onDelete={
           playlistModalMode === "edit"
             ? () =>
                 setDeletePlaylistTarget({
-                  id: playlistDraft.id,
-                  title: playlistDraft.title,
+                  id: playlistInitial.id,
+                  title: playlistInitial.title,
                 })
             : undefined
         }

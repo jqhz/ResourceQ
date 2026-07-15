@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
+import Alert from "@mui/material/Alert";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -11,6 +12,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import type { CategorySlug, Playlist } from "@src/utils/types";
 import { CATEGORIES } from "@src/utils/constants";
+import { getNextPlaylistId } from "@src/utils/id";
 import { SLUG_PATTERN, slugify } from "@src/utils/slug";
 
 export const emptyPlaylist = (): Playlist => ({
@@ -25,55 +27,76 @@ export const emptyPlaylist = (): Playlist => ({
 interface PlaylistModalProps {
   open: boolean;
   mode: "add" | "edit";
-  draft: Playlist;
+  initialPlaylist: Playlist;
   playlists: Playlist[];
+  existingPlaylistIds: string[];
   onClose: () => void;
-  onChange: (draft: Playlist) => void;
-  onSave: () => void;
+  onSave: (playlist: Playlist) => void;
   onDelete?: () => void;
   saving?: boolean;
   deleting?: boolean;
 }
 
+function validatePlaylist(playlist: Playlist): string | null {
+  if (!playlist.id.trim()) return "ID is required.";
+  if (!playlist.title.trim()) return "Title is required.";
+  if (!playlist.slug.trim()) return "Slug is required.";
+  if (!SLUG_PATTERN.test(playlist.slug.trim())) {
+    return "Slug must use lowercase letters, numbers, and dashes only.";
+  }
+  if (!playlist.image.trim()) return "Image is required.";
+  return null;
+}
+
 export default function PlaylistModal({
   open,
   mode,
-  draft,
+  initialPlaylist,
   playlists,
+  existingPlaylistIds,
   onClose,
-  onChange,
   onSave,
   onDelete,
   saving = false,
   deleting = false,
 }: PlaylistModalProps) {
-  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+  const [draft, setDraft] = useState(initialPlaylist);
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(mode === "edit");
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (open) {
-      setSlugManuallyEdited(mode === "edit");
-    }
-  }, [open, mode]);
-
-  const parentOptions = playlists.filter(
-    (playlist) =>
-      playlist.category === draft.category && playlist.id !== draft.id,
+  const parentOptions = useMemo(
+    () =>
+      playlists.filter(
+        (playlist) =>
+          playlist.category === draft.category && playlist.id !== draft.id,
+      ),
+    [playlists, draft.category, draft.id],
   );
 
   const setField = <K extends keyof Playlist>(key: K, value: Playlist[K]) => {
-    onChange({ ...draft, [key]: value });
+    setDraft((current) => ({ ...current, [key]: value }));
+    setValidationError(null);
   };
 
-  const slugValid = SLUG_PATTERN.test(draft.slug.trim());
-  const canSave =
-    Boolean(draft.id && draft.title && draft.image && draft.slug.trim()) &&
-    slugValid;
+  const handleSave = () => {
+    const error = validatePlaylist(draft);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+    onSave(draft);
+  };
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>{mode === "add" ? "Add Playlist" : "Edit Playlist"}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
+          {validationError && (
+            <Alert severity="error" onClose={() => setValidationError(null)}>
+              {validationError}
+            </Alert>
+          )}
           <TextField
             label="ID"
             value={draft.id}
@@ -87,11 +110,13 @@ export default function PlaylistModal({
             value={draft.title}
             onChange={(event) => {
               const title = event.target.value;
-              if (mode === "add" && !slugManuallyEdited) {
-                onChange({ ...draft, title, slug: slugify(title) });
-                return;
-              }
-              setField("title", title);
+              setDraft((current) => {
+                if (mode === "add" && !slugManuallyEdited) {
+                  return { ...current, title, slug: slugify(title) };
+                }
+                return { ...current, title };
+              });
+              setValidationError(null);
             }}
             fullWidth
           />
@@ -102,12 +127,7 @@ export default function PlaylistModal({
               setSlugManuallyEdited(true);
               setField("slug", event.target.value);
             }}
-            helperText={
-              draft.slug && !slugValid
-                ? "Use lowercase letters, numbers, and dashes only."
-                : "Used in public URLs for this playlist within its category."
-            }
-            error={Boolean(draft.slug && !slugValid)}
+            helperText="Used in public URLs for this playlist within its category."
             fullWidth
           />
           <TextField
@@ -116,11 +136,18 @@ export default function PlaylistModal({
             value={draft.category}
             onChange={(event) => {
               const category = event.target.value as CategorySlug;
-              onChange({
-                ...draft,
-                category,
-                parentPlaylistId: undefined,
+              setDraft((current) => {
+                const next: Playlist = {
+                  ...current,
+                  category,
+                  parentPlaylistId: undefined,
+                };
+                if (mode === "add") {
+                  next.id = getNextPlaylistId(category, existingPlaylistIds);
+                }
+                return next;
               });
+              setValidationError(null);
             }}
             fullWidth
           >
@@ -176,8 +203,8 @@ export default function PlaylistModal({
           </Button>
           <Button
             variant="contained"
-            onClick={onSave}
-            disabled={saving || deleting || !canSave}
+            onClick={handleSave}
+            disabled={saving || deleting}
           >
             {mode === "add" ? "Add Playlist" : "Save Changes"}
           </Button>
