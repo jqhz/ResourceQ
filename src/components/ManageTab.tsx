@@ -25,7 +25,7 @@ import Typography from "@mui/material/Typography";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import SearchIcon from "@mui/icons-material/Search";
-import type { CardItem, Playlist } from "@src/utils/types";
+import type { CardItem, Playlist, ReorderContext } from "@src/utils/types";
 import { CATEGORIES } from "@src/utils/constants";
 import { searchCards } from "@src/utils/search";
 import { getNextIdForCategory, getNextPlaylistId } from "@src/utils/id";
@@ -59,6 +59,7 @@ export default function ManageTab() {
     id: string;
     title: string;
   } | null>(null);
+  const [reordering, setReordering] = useState(false);
   const [toast, setToast] = useState<{ open: boolean; message: string }>({
     open: false,
     message: "",
@@ -98,18 +99,66 @@ export default function ManageTab() {
     [],
   );
 
+  const activeCards = useMemo(
+    () => cards.filter((card) => !card.archived),
+    [cards],
+  );
+
+  const archivedCards = useMemo(
+    () => cards.filter((card) => card.archived),
+    [cards],
+  );
+
+  const reorderContext = useMemo((): ReorderContext | null => {
+    if (filter.startsWith("category:")) {
+      return {
+        type: "category",
+        category: filter.replace("category:", "") as CardItem["categories"][number],
+      };
+    }
+    if (filter.startsWith("playlist:")) {
+      return {
+        type: "playlist",
+        playlistId: filter.replace("playlist:", ""),
+      };
+    }
+    return null;
+  }, [filter]);
+
+  const playlistSiblingIndex = useMemo(() => {
+    const indexById = new Map<string, { index: number; count: number }>();
+    const groups = new Map<string, Playlist[]>();
+    for (const playlist of playlists) {
+      const key = `${playlist.category}::${playlist.parentPlaylistId ?? ""}`;
+      const group = groups.get(key) ?? [];
+      group.push(playlist);
+      groups.set(key, group);
+    }
+    for (const group of groups.values()) {
+      const sorted = [...group].sort(
+        (left, right) => left.position - right.position || left.id.localeCompare(right.id),
+      );
+      sorted.forEach((playlist, index) => {
+        indexById.set(playlist.id, { index, count: sorted.length });
+      });
+    }
+    return indexById;
+  }, [playlists]);
+
   const filteredByCategory = useMemo(() => {
-    if (filter === "all") return cards;
+    if (filter === "all") return activeCards;
     if (filter.startsWith("category:")) {
       const category = filter.replace("category:", "");
-      return cards.filter((card) => card.categories.includes(category as CardItem["categories"][number]));
+      return activeCards.filter((card) =>
+        card.categories.includes(category as CardItem["categories"][number]),
+      );
     }
     if (filter.startsWith("playlist:")) {
       const playlistId = filter.replace("playlist:", "");
-      return cards.filter((card) => card.playlistIds.includes(playlistId));
+      return activeCards.filter((card) => card.playlistIds.includes(playlistId));
     }
-    return cards;
-  }, [cards, filter]);
+    return activeCards;
+  }, [activeCards, filter]);
 
   const displayedCards = useMemo(
     () => searchCards(filteredByCategory, searchQuery),
@@ -118,6 +167,27 @@ export default function ManageTab() {
 
   const sortedDisplayedCards = useMemo(() => {
     const nextCards = [...displayedCards];
+
+    if (reorderContext?.type === "category") {
+      const category = reorderContext.category;
+      nextCards.sort(
+        (left, right) =>
+          (left.categoryPositions[category] ?? 0) -
+          (right.categoryPositions[category] ?? 0),
+      );
+      return nextCards;
+    }
+
+    if (reorderContext?.type === "playlist") {
+      const playlistId = reorderContext.playlistId;
+      nextCards.sort(
+        (left, right) =>
+          (left.playlistPositions[playlistId] ?? 0) -
+          (right.playlistPositions[playlistId] ?? 0),
+      );
+      return nextCards;
+    }
+
     if (!idSortOrder) return nextCards;
 
     nextCards.sort((left, right) => {
@@ -129,13 +199,21 @@ export default function ManageTab() {
     });
 
     return nextCards;
-  }, [displayedCards, idSortOrder]);
+  }, [displayedCards, idSortOrder, reorderContext]);
+
+  const sortedArchivedCards = useMemo(
+    () =>
+      [...archivedCards].sort((left, right) =>
+        left.title.localeCompare(right.title, undefined, { sensitivity: "base" }),
+      ),
+    [archivedCards],
+  );
 
   const searchOptions = useMemo(() => {
     const trimmed = searchQuery.trim();
     if (!trimmed) return [];
-    return searchCards(cards, trimmed).slice(0, 8);
-  }, [cards, searchQuery]);
+    return searchCards(activeCards, trimmed).slice(0, 8);
+  }, [activeCards, searchQuery]);
 
   const filterOptions = useMemo(() => {
     const options: React.ReactNode[] = [
@@ -346,6 +424,65 @@ export default function ManageTab() {
     await fetchContent();
   };
 
+  const handleArchiveToggle = async (card: CardItem, archived: boolean) => {
+    const response = await fetch(`/api/cards/${card.id}/archive`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    });
+    if (!response.ok) {
+      setToast({
+        open: true,
+        message: archived ? "Failed to archive card." : "Failed to restore card.",
+      });
+      return;
+    }
+    setToast({
+      open: true,
+      message: archived ? "Card archived." : "Card restored.",
+    });
+    await fetchContent();
+  };
+
+  const handleReorderPlaylist = async (
+    playlistId: string,
+    direction: "up" | "down",
+  ) => {
+    setReordering(true);
+    const response = await fetch("/api/reorder/playlists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playlistId, direction }),
+    });
+    setReordering(false);
+    if (!response.ok) {
+      setToast({ open: true, message: "Failed to reorder playlist." });
+      return;
+    }
+    await fetchContent();
+  };
+
+  const handleReorderCard = async (
+    cardId: string,
+    direction: "up" | "down",
+  ) => {
+    if (!reorderContext) return;
+    setReordering(true);
+    const response = await fetch("/api/reorder/cards", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardId, direction, context: reorderContext }),
+    });
+    setReordering(false);
+    if (!response.ok) {
+      setToast({ open: true, message: "Failed to reorder card." });
+      return;
+    }
+    await fetchContent();
+  };
+
+  const canReorderCards = reorderContext !== null;
+
   return (
     <Stack spacing={3}>
       <Stack
@@ -376,12 +513,15 @@ export default function ManageTab() {
                 <TableCell>Slug</TableCell>
                 <TableCell>ID</TableCell>
                 <TableCell>Category</TableCell>
+                <TableCell>Order</TableCell>
                 <TableCell>Image</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {playlists.map((playlist) => (
+              {playlists.map((playlist) => {
+                const sibling = playlistSiblingIndex.get(playlist.id);
+                return (
                 <TableRow
                   key={playlist.id}
                   hover
@@ -393,6 +533,34 @@ export default function ManageTab() {
                   <TableCell>{playlist.id}</TableCell>
                   <TableCell>
                     {categoryLabel.get(playlist.category) ?? playlist.category}
+                  </TableCell>
+                  <TableCell onClick={(event) => event.stopPropagation()}>
+                    <Stack direction="row" spacing={0.5}>
+                      <Button
+                        size="small"
+                        disabled={
+                          reordering ||
+                          !sibling ||
+                          sibling.index === 0
+                        }
+                        onClick={() => handleReorderPlaylist(playlist.id, "up")}
+                        aria-label="Move playlist up"
+                      >
+                        <ArrowUpwardIcon fontSize="small" />
+                      </Button>
+                      <Button
+                        size="small"
+                        disabled={
+                          reordering ||
+                          !sibling ||
+                          sibling.index >= sibling.count - 1
+                        }
+                        onClick={() => handleReorderPlaylist(playlist.id, "down")}
+                        aria-label="Move playlist down"
+                      >
+                        <ArrowDownwardIcon fontSize="small" />
+                      </Button>
+                    </Stack>
                   </TableCell>
                   <TableCell sx={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {playlist.image}
@@ -417,10 +585,11 @@ export default function ManageTab() {
                     </Stack>
                   </TableCell>
                 </TableRow>
-              ))}
+              );
+              })}
               {playlists.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6}>
+                  <TableCell colSpan={7}>
                     <Typography color="text.secondary">No playlists found.</Typography>
                   </TableCell>
                 </TableRow>
@@ -437,7 +606,7 @@ export default function ManageTab() {
           direction="row"
           sx={{ justifyContent: "space-between", alignItems: "center", gap: 2, flexWrap: "wrap" }}
         >
-          <Typography variant="h6">Cards</Typography>
+          <Typography variant="h6">Active Cards</Typography>
           <TextField
             select
             size="small"
@@ -449,6 +618,12 @@ export default function ManageTab() {
             {filterOptions}
           </TextField>
         </Stack>
+
+        {canReorderCards && (
+          <Typography variant="body2" color="text.secondary">
+            Reorder cards within this {reorderContext?.type === "category" ? "category" : "playlist"} using the arrows in the Order column.
+          </Typography>
+        )}
 
         <Stack spacing={1}>
           <TextField
@@ -537,11 +712,12 @@ export default function ManageTab() {
               <TableCell>Categories</TableCell>
               <TableCell>Playlists</TableCell>
               <TableCell>URL</TableCell>
+              {canReorderCards && <TableCell>Order</TableCell>}
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {sortedDisplayedCards.map((card) => (
+            {sortedDisplayedCards.map((card, index) => (
               <TableRow
                 key={card.id}
                 hover
@@ -581,6 +757,30 @@ export default function ManageTab() {
                 <TableCell sx={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}>
                   {card.url}
                 </TableCell>
+                {canReorderCards && (
+                  <TableCell onClick={(event) => event.stopPropagation()}>
+                    <Stack direction="row" spacing={0.5}>
+                      <Button
+                        size="small"
+                        disabled={reordering || index === 0}
+                        onClick={() => handleReorderCard(card.id, "up")}
+                        aria-label="Move card up"
+                      >
+                        <ArrowUpwardIcon fontSize="small" />
+                      </Button>
+                      <Button
+                        size="small"
+                        disabled={
+                          reordering || index === sortedDisplayedCards.length - 1
+                        }
+                        onClick={() => handleReorderCard(card.id, "down")}
+                        aria-label="Move card down"
+                      >
+                        <ArrowDownwardIcon fontSize="small" />
+                      </Button>
+                    </Stack>
+                  </TableCell>
+                )}
                 <TableCell align="right" onClick={(event) => event.stopPropagation()}>
                   <Stack
                     direction="row"
@@ -589,6 +789,12 @@ export default function ManageTab() {
                   >
                     <Button size="small" onClick={() => openEditModal(card)}>
                       Edit
+                    </Button>
+                    <Button
+                      size="small"
+                      onClick={() => handleArchiveToggle(card, true)}
+                    >
+                      Archive
                     </Button>
                     <Button
                       size="small"
@@ -603,7 +809,7 @@ export default function ManageTab() {
             ))}
             {sortedDisplayedCards.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6}>
+                <TableCell colSpan={canReorderCards ? 7 : 6}>
                   <Typography color="text.secondary">No cards found.</Typography>
                 </TableCell>
               </TableRow>
@@ -611,6 +817,78 @@ export default function ManageTab() {
           </TableBody>
         </Table>
       </Box>
+
+      <Divider />
+
+      <Stack spacing={2}>
+        <Typography variant="h6">Archived Cards</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Archived cards are hidden from public views. Restore them here when needed.
+        </Typography>
+        <Box sx={{ overflowX: "auto" }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Title</TableCell>
+                <TableCell>ID</TableCell>
+                <TableCell>Categories</TableCell>
+                <TableCell>URL</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {sortedArchivedCards.map((card) => (
+                <TableRow key={card.id} hover>
+                  <TableCell>{card.title}</TableCell>
+                  <TableCell>{card.id}</TableCell>
+                  <TableCell>
+                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
+                      {card.categories.map((slug) => (
+                        <Chip
+                          key={slug}
+                          label={categoryLabel.get(slug) ?? slug}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Stack>
+                  </TableCell>
+                  <TableCell sx={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {card.url}
+                  </TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
+                      <Button size="small" onClick={() => openEditModal(card)}>
+                        Edit
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => handleArchiveToggle(card, false)}
+                      >
+                        Restore
+                      </Button>
+                      <Button
+                        size="small"
+                        color="error"
+                        onClick={() => requestDelete(card)}
+                      >
+                        Delete
+                      </Button>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {sortedArchivedCards.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <Typography color="text.secondary">No archived cards.</Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Box>
+      </Stack>
 
       <CardModal
         key={`card-${modalKey}`}

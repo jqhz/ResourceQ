@@ -3,6 +3,7 @@ import {
   text,
   timestamp,
   boolean,
+  integer,
   pgEnum,
   primaryKey,
   foreignKey,
@@ -35,6 +36,7 @@ export const playlists = pgTable(
     parentPlaylistId: text("parent_playlist_id"),
     title: text("title").notNull(),
     slug: text("slug").notNull(),
+    position: integer("position").notNull().default(0),
     image: text("image").notNull(),
     description: text("description"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -61,6 +63,7 @@ export const cards = pgTable("cards", {
   image: text("image"),
   date: text("date"),
   recommended: boolean("recommended").notNull().default(false),
+  archived: boolean("archived").notNull().default(false),
   url: text("url").notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
@@ -89,6 +92,7 @@ export const playlistCards = pgTable(
     cardId: text("card_id")
       .notNull()
       .references(() => cards.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.playlistId, t.cardId] }),
@@ -104,6 +108,7 @@ export const cardCategories = pgTable(
     categorySlug: categorySlugEnum("category_slug")
       .notNull()
       .references(() => categories.slug, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.cardId, t.categorySlug] }),

@@ -20,6 +20,7 @@ export const emptyPlaylist = (): Playlist => ({
   category: "tutorials",
   title: "",
   slug: "",
+  position: 0,
   image: "",
   description: "",
 });

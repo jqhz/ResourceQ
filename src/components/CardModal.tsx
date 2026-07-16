@@ -20,12 +20,15 @@ export const emptyCard = (): CardItem => ({
   id: "",
   categories: ["tutorials"],
   playlistIds: [],
+  categoryPositions: {},
+  playlistPositions: {},
   title: "",
   description: "",
   image: "",
   date: "",
   url: "",
   recommended: false,
+  archived: false,
 });
 
 interface CardModalProps {
@@ -167,6 +170,17 @@ export default function CardModal({
             }
             label="Recommended card"
           />
+          {mode === "edit" && (
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={Boolean(draft.archived)}
+                  onChange={(event) => setField("archived", event.target.checked)}
+                />
+              }
+              label="Archived (hidden from public views)"
+            />
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ justifyContent: "space-between", px: 3, pb: 2 }}>

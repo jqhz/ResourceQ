@@ -17,11 +17,14 @@ const toQueuedCard = (
   id: row.id,
   categories,
   playlistIds,
+  categoryPositions: {},
+  playlistPositions: {},
   title: row.title,
   description: row.description ?? undefined,
   image: row.image ?? undefined,
   date: row.date ?? undefined,
   recommended: row.recommended,
+  archived: false,
   url: row.url,
 });
 

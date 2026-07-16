@@ -3,6 +3,7 @@ import { db } from "./index";
 import { playlists } from "../schema";
 import type { CategorySlug, Playlist } from "../types";
 import { slugify } from "../slug";
+import { nextPlaylistPosition } from "./ordering";
 
 export interface PlaylistInput {
   id: string;
@@ -10,6 +11,7 @@ export interface PlaylistInput {
   parentPlaylistId?: string;
   title: string;
   slug: string;
+  position?: number;
   image: string;
   description?: string;
 }
@@ -108,6 +110,17 @@ export const resolvePlaylistSlug = async (
 };
 
 export const upsertPlaylist = async (input: PlaylistInput) => {
+  const [existing] = await db
+    .select({ position: playlists.position })
+    .from(playlists)
+    .where(eq(playlists.id, input.id))
+    .limit(1);
+
+  const position =
+    input.position ??
+    existing?.position ??
+    (await nextPlaylistPosition(input.category, input.parentPlaylistId));
+
   await db
     .insert(playlists)
     .values({
@@ -116,6 +129,7 @@ export const upsertPlaylist = async (input: PlaylistInput) => {
       parentPlaylistId: input.parentPlaylistId,
       title: input.title,
       slug: input.slug,
+      position,
       image: input.image,
       description: input.description,
     })
@@ -126,6 +140,7 @@ export const upsertPlaylist = async (input: PlaylistInput) => {
         parentPlaylistId: input.parentPlaylistId,
         title: input.title,
         slug: input.slug,
+        position,
         image: input.image,
         description: input.description,
       },
