@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "./index";
 import {
   cards,
@@ -41,22 +41,19 @@ const toCardItem = (
 });
 
 export const listCards = async (): Promise<CardItem[]> => {
-  const cardRows = await db.select().from(cards);
-  if (cardRows.length === 0) return [];
-
-  const cardIds = cardRows.map((row) => row.id);
-  const [categoryRows, playlistRows] = await Promise.all([
+  const [cardRows, categoryRows, playlistRows] = await Promise.all([
+    db.select().from(cards),
     db
       .select()
       .from(cardCategories)
-      .where(inArray(cardCategories.cardId, cardIds))
       .orderBy(asc(cardCategories.position)),
     db
       .select()
       .from(playlistCards)
-      .where(inArray(playlistCards.cardId, cardIds))
       .orderBy(asc(playlistCards.position)),
   ]);
+
+  if (cardRows.length === 0) return [];
 
   const categoriesByCard = new Map<string, CategorySlug[]>();
   const categoryPositionsByCard = new Map<string, CategoryPositions>();
