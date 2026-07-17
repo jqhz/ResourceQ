@@ -1,22 +1,47 @@
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-serverless";
-import ws from "ws";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "../schema";
+import { withDbRetry } from "./retry";
 
-neonConfig.webSocketConstructor = ws;
+const getDatabaseUrl = () => {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error("DATABASE_URL is not set.");
+  }
 
-const globalForDb = globalThis as unknown as {
-  pool: Pool | undefined;
+  return url
+    .replace(/([?&])channel_binding=require&?/g, "$1")
+    .replace(/[?&]$/, "");
 };
 
-const pool =
-  globalForDb.pool ??
-  new Pool({
-    connectionString: process.env.DATABASE_URL,
+const createRetryingClient = (
+  connectionString: string,
+): NeonQueryFunction<false, false> => {
+  const baseSql = neon(connectionString, {
+    fetchOptions: {
+      cache: "no-store",
+    },
   });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.pool = pool;
-}
+  const client = ((strings, ...values) =>
+    withDbRetry(() => baseSql(strings, ...values))) as NeonQueryFunction<
+    false,
+    false
+  >;
 
-export const db = drizzle(pool, { schema });
+  client.query = ((query, params, options) =>
+    withDbRetry(() => baseSql.query(query, params, options))) as typeof baseSql.query;
+
+  if (baseSql.unsafe) {
+    client.unsafe = baseSql.unsafe;
+  }
+
+  if (baseSql.transaction) {
+    client.transaction = ((queries, options) =>
+      withDbRetry(() => baseSql.transaction!(queries, options))) as typeof baseSql.transaction;
+  }
+
+  return client;
+};
+
+export const db = drizzle(createRetryingClient(getDatabaseUrl()), { schema });
