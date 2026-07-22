@@ -48,3 +48,11 @@ export interface CardInput {
 export type ReorderContext =
   | { type: "category"; category: CategorySlug }
   | { type: "playlist"; playlistId: string };
+
+export type CategoryTimelineEntry =
+  | { kind: "card"; id: string }
+  | { kind: "playlist"; id: string };
+
+export type CategoryTimelineRow =
+  | { kind: "card"; id: string; position: number; card: CardItem }
+  | { kind: "playlist"; id: string; position: number; playlist: Playlist };

@@ -5,7 +5,7 @@ import {
   playlistCards,
   playlists,
 } from "../schema";
-import type { CategorySlug, ReorderContext } from "../types";
+import type { CategorySlug, ReorderContext, CategoryTimelineEntry } from "../types";
 
 export const nextPlaylistPosition = async (
   category: CategorySlug,
@@ -113,13 +113,13 @@ const renumberCategoryCardPositions = async (
   }
 };
 
-type CategoryTimelineEntry =
+type CategoryTimelineItem =
   | { kind: "card"; id: string; position: number }
   | { kind: "playlist"; id: string; position: number };
 
 const getCategoryTimeline = async (
   category: CategorySlug,
-): Promise<CategoryTimelineEntry[]> => {
+): Promise<CategoryTimelineItem[]> => {
   const [cardRows, playlistRows] = await Promise.all([
     db
       .select({
@@ -142,7 +142,7 @@ const getCategoryTimeline = async (
       ),
   ]);
 
-  const entries: CategoryTimelineEntry[] = [
+  const entries: CategoryTimelineItem[] = [
     ...cardRows.map((row) => ({
       kind: "card" as const,
       id: row.id,
@@ -164,7 +164,7 @@ const getCategoryTimeline = async (
 
 const renumberCategoryTimeline = async (
   category: CategorySlug,
-  timeline: CategoryTimelineEntry[],
+  timeline: CategoryTimelineItem[],
 ) => {
   for (let index = 0; index < timeline.length; index += 1) {
     const entry = timeline[index];
@@ -185,6 +185,18 @@ const renumberCategoryTimeline = async (
         .where(eq(playlists.id, entry.id));
     }
   }
+};
+
+export const setCategoryTimelineOrder = async (
+  category: CategorySlug,
+  order: CategoryTimelineEntry[],
+): Promise<{ ok: true } | { error: string }> => {
+  const timeline: CategoryTimelineItem[] = order.map((entry, index) => ({
+    ...entry,
+    position: index,
+  }));
+  await renumberCategoryTimeline(category, timeline);
+  return { ok: true };
 };
 
 const reorderCategoryRootCard = async (
