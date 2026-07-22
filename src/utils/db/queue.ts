@@ -1,6 +1,9 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "./index";
 import {
+  cards,
+  cardCategories,
+  playlistCards,
   queuedCards,
   queuedCardCategories,
   queuedPlaylistCards,
@@ -139,7 +142,130 @@ export const deleteQueuedCard = async (id: string) => {
   await db.delete(queuedCards).where(eq(queuedCards.id, id));
 };
 
-export const acceptQueuedCard = async (input: CardInput) => {
+export type AcceptQueuedCardResult = {
+  targetId: string;
+  mergedIntoExisting: boolean;
+};
+
+export type AcceptAllQueuedCardsResult = {
+  accepted: number;
+  merged: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+};
+
+const queuedCardToInput = (card: CardItem): CardInput => ({
+  id: card.id,
+  categories: card.categories,
+  playlistIds: card.playlistIds,
+  categoryPositions: card.categoryPositions,
+  playlistPositions: card.playlistPositions,
+  title: card.title.trim(),
+  description: card.description?.trim() || undefined,
+  image: card.image?.trim() || undefined,
+  date: card.date?.trim() || undefined,
+  recommended: card.recommended,
+  url: card.url.trim(),
+});
+
+const isAcceptableQueuedCard = (card: CardItem) =>
+  Boolean(card.title.trim()) &&
+  Boolean(card.url.trim()) &&
+  (card.categories.length > 0 || card.playlistIds.length > 0);
+
+export const acceptAllQueuedCards = async (): Promise<AcceptAllQueuedCardsResult> => {
+  const cards = await listQueuedCards();
+  let accepted = 0;
+  let merged = 0;
+  let skipped = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const card of cards) {
+    if (!isAcceptableQueuedCard(card)) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      const result = await acceptQueuedCard(queuedCardToInput(card));
+      if (result.mergedIntoExisting) {
+        merged += 1;
+      } else {
+        accepted += 1;
+      }
+    } catch (error) {
+      failed += 1;
+      errors.push(
+        `${card.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
+    }
+  }
+
+  return { accepted, merged, skipped, failed, errors };
+};
+
+export const acceptQueuedCard = async (
+  input: CardInput,
+): Promise<AcceptQueuedCardResult> => {
+  const [existingByUrl] = await db
+    .select({ id: cards.id })
+    .from(cards)
+    .where(eq(cards.url, input.url))
+    .limit(1);
+
+  if (existingByUrl && existingByUrl.id !== input.id) {
+    const [existingCategoryRows, existingPlaylistRows] = await Promise.all([
+      db
+        .select()
+        .from(cardCategories)
+        .where(eq(cardCategories.cardId, existingByUrl.id)),
+      db
+        .select()
+        .from(playlistCards)
+        .where(eq(playlistCards.cardId, existingByUrl.id)),
+    ]);
+
+    const mergedCategories = [
+      ...new Set([
+        ...existingCategoryRows.map((row) => row.categorySlug),
+        ...input.categories,
+      ]),
+    ];
+    const mergedPlaylistIds = [
+      ...new Set([
+        ...existingPlaylistRows.map((row) => row.playlistId),
+        ...input.playlistIds,
+      ]),
+    ];
+
+    const mergedCategoryPositions = {
+      ...Object.fromEntries(
+        existingCategoryRows.map((row) => [row.categorySlug, row.position]),
+      ),
+      ...input.categoryPositions,
+    };
+    const mergedPlaylistPositions = {
+      ...Object.fromEntries(
+        existingPlaylistRows.map((row) => [row.playlistId, row.position]),
+      ),
+      ...input.playlistPositions,
+    };
+
+    await upsertCard({
+      ...input,
+      id: existingByUrl.id,
+      categories: mergedCategories,
+      playlistIds: mergedPlaylistIds,
+      categoryPositions: mergedCategoryPositions,
+      playlistPositions: mergedPlaylistPositions,
+    });
+    await deleteQueuedCard(input.id);
+    return { targetId: existingByUrl.id, mergedIntoExisting: true };
+  }
+
   await upsertCard(input);
   await deleteQueuedCard(input.id);
+  return { targetId: input.id, mergedIntoExisting: false };
 };

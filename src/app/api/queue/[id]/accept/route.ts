@@ -15,14 +15,14 @@ export const POST = async (request: Request, context: RouteContext) => {
     if (parsed.data.id !== id) {
       return jsonError("Card id mismatch.");
     }
-    await acceptQueuedCard(normalizeCardInput(parsed.data));
-    return Response.json({ ok: true });
+    const result = await acceptQueuedCard(normalizeCardInput(parsed.data));
+    return Response.json({
+      ok: true,
+      mergedIntoExisting: result.mergedIntoExisting,
+      targetId: result.targetId,
+    });
   } catch (error) {
     console.error(error);
-    const message =
-      error instanceof Error && error.message.includes("unique")
-        ? "A card with this URL already exists."
-        : "Failed to accept queued card.";
-    return jsonError(message, 500);
+    return jsonError("Failed to accept queued card.", 500);
   }
 };

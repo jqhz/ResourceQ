@@ -125,6 +125,52 @@ export default function ManageTab() {
     return null;
   }, [filter]);
 
+  const categoryRootCardReorder = useMemo(() => {
+    if (reorderContext?.type !== "category") {
+      return null;
+    }
+
+    const category = reorderContext.category;
+    const timeline = [
+      ...activeCards
+        .filter((card) => card.categories.includes(category))
+        .map((card) => ({
+          kind: "card" as const,
+          id: card.id,
+          position: card.categoryPositions[category] ?? 0,
+        })),
+      ...playlists
+        .filter(
+          (playlist) =>
+            playlist.category === category && !playlist.parentPlaylistId,
+        )
+        .map((playlist) => ({
+          kind: "playlist" as const,
+          id: playlist.id,
+          position: playlist.position,
+        })),
+    ].sort(
+      (left, right) =>
+        left.position - right.position || left.id.localeCompare(right.id),
+    );
+
+    const moveState = new Map<string, { canUp: boolean; canDown: boolean }>();
+    const rootCardIndexes = timeline
+      .map((entry, index) => (entry.kind === "card" ? index : -1))
+      .filter((index) => index >= 0);
+
+    rootCardIndexes.forEach((timelineIndex, rootIndex) => {
+      const entry = timeline[timelineIndex];
+      if (entry.kind !== "card") return;
+      moveState.set(entry.id, {
+        canUp: rootIndex > 0,
+        canDown: rootIndex < rootCardIndexes.length - 1,
+      });
+    });
+
+    return moveState;
+  }, [activeCards, playlists, reorderContext]);
+
   const playlistSiblingIndex = useMemo(() => {
     const indexById = new Map<string, { index: number; count: number }>();
     const groups = new Map<string, Playlist[]>();
@@ -621,7 +667,9 @@ export default function ManageTab() {
 
         {canReorderCards && (
           <Typography variant="body2" color="text.secondary">
-            Reorder cards within this {reorderContext?.type === "category" ? "category" : "playlist"} using the arrows in the Order column.
+            {reorderContext?.type === "category"
+              ? "Root category cards jump past playlists to the next root card when using the arrows."
+              : "Reorder cards within this playlist using the arrows in the Order column."}
           </Typography>
         )}
 
@@ -717,7 +765,21 @@ export default function ManageTab() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {sortedDisplayedCards.map((card, index) => (
+            {sortedDisplayedCards.map((card, index) => {
+              const rootMoveState =
+                reorderContext?.type === "category"
+                  ? categoryRootCardReorder?.get(card.id)
+                  : null;
+              const canMoveUp =
+                reorderContext?.type === "category"
+                  ? Boolean(rootMoveState?.canUp)
+                  : index > 0;
+              const canMoveDown =
+                reorderContext?.type === "category"
+                  ? Boolean(rootMoveState?.canDown)
+                  : index < sortedDisplayedCards.length - 1;
+
+              return (
               <TableRow
                 key={card.id}
                 hover
@@ -762,7 +824,7 @@ export default function ManageTab() {
                     <Stack direction="row" spacing={0.5}>
                       <Button
                         size="small"
-                        disabled={reordering || index === 0}
+                        disabled={reordering || !canMoveUp}
                         onClick={() => handleReorderCard(card.id, "up")}
                         aria-label="Move card up"
                       >
@@ -770,9 +832,7 @@ export default function ManageTab() {
                       </Button>
                       <Button
                         size="small"
-                        disabled={
-                          reordering || index === sortedDisplayedCards.length - 1
-                        }
+                        disabled={reordering || !canMoveDown}
                         onClick={() => handleReorderCard(card.id, "down")}
                         aria-label="Move card down"
                       >
@@ -806,7 +866,8 @@ export default function ManageTab() {
                   </Stack>
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
             {sortedDisplayedCards.length === 0 && (
               <TableRow>
                 <TableCell colSpan={canReorderCards ? 7 : 6}>

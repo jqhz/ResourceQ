@@ -113,6 +113,132 @@ const renumberCategoryCardPositions = async (
   }
 };
 
+type CategoryTimelineEntry =
+  | { kind: "card"; id: string; position: number }
+  | { kind: "playlist"; id: string; position: number };
+
+const getCategoryTimeline = async (
+  category: CategorySlug,
+): Promise<CategoryTimelineEntry[]> => {
+  const [cardRows, playlistRows] = await Promise.all([
+    db
+      .select({
+        id: cardCategories.cardId,
+        position: cardCategories.position,
+      })
+      .from(cardCategories)
+      .where(eq(cardCategories.categorySlug, category)),
+    db
+      .select({
+        id: playlists.id,
+        position: playlists.position,
+      })
+      .from(playlists)
+      .where(
+        and(
+          eq(playlists.categorySlug, category),
+          isNull(playlists.parentPlaylistId),
+        ),
+      ),
+  ]);
+
+  const entries: CategoryTimelineEntry[] = [
+    ...cardRows.map((row) => ({
+      kind: "card" as const,
+      id: row.id,
+      position: row.position,
+    })),
+    ...playlistRows.map((row) => ({
+      kind: "playlist" as const,
+      id: row.id,
+      position: row.position,
+    })),
+  ];
+
+  entries.sort(
+    (left, right) =>
+      left.position - right.position || left.id.localeCompare(right.id),
+  );
+  return entries;
+};
+
+const renumberCategoryTimeline = async (
+  category: CategorySlug,
+  timeline: CategoryTimelineEntry[],
+) => {
+  for (let index = 0; index < timeline.length; index += 1) {
+    const entry = timeline[index];
+    if (entry.kind === "card") {
+      await db
+        .update(cardCategories)
+        .set({ position: index })
+        .where(
+          and(
+            eq(cardCategories.categorySlug, category),
+            eq(cardCategories.cardId, entry.id),
+          ),
+        );
+    } else {
+      await db
+        .update(playlists)
+        .set({ position: index })
+        .where(eq(playlists.id, entry.id));
+    }
+  }
+};
+
+const reorderCategoryRootCard = async (
+  cardId: string,
+  category: CategorySlug,
+  direction: "up" | "down",
+): Promise<{ ok: true } | { error: string }> => {
+  const timeline = await getCategoryTimeline(category);
+  const index = timeline.findIndex(
+    (entry) => entry.kind === "card" && entry.id === cardId,
+  );
+  if (index < 0) {
+    return { error: "Card not found in category." };
+  }
+
+  if (direction === "up") {
+    let targetIndex = -1;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      if (timeline[cursor].kind === "card") {
+        targetIndex = cursor;
+        break;
+      }
+    }
+
+    const [entry] = timeline.splice(index, 1);
+    if (targetIndex < 0) {
+      timeline.unshift(entry);
+    } else {
+      timeline.splice(targetIndex, 0, entry);
+    }
+  } else {
+    let targetCardId: string | null = null;
+    for (let cursor = index + 1; cursor < timeline.length; cursor += 1) {
+      if (timeline[cursor].kind === "card") {
+        targetCardId = timeline[cursor].id;
+        break;
+      }
+    }
+
+    const [entry] = timeline.splice(index, 1);
+    if (!targetCardId) {
+      timeline.push(entry);
+    } else {
+      const insertIndex = timeline.findIndex(
+        (item) => item.kind === "card" && item.id === targetCardId,
+      );
+      timeline.splice(insertIndex + 1, 0, entry);
+    }
+  }
+
+  await renumberCategoryTimeline(category, timeline);
+  return { ok: true };
+};
+
 const renumberPlaylistCardPositions = async (
   playlistId: string,
   orderedCardIds: string[],
@@ -136,24 +262,7 @@ export const reorderCard = async (
   direction: "up" | "down",
 ): Promise<{ ok: true } | { error: string }> => {
   if (context.type === "category") {
-    const rows = await db
-      .select({ cardId: cardCategories.cardId })
-      .from(cardCategories)
-      .where(eq(cardCategories.categorySlug, context.category))
-      .orderBy(asc(cardCategories.position), asc(cardCategories.cardId));
-
-    const orderedIds = rows.map((row) => row.cardId);
-    const index = orderedIds.indexOf(cardId);
-    const swapIndex = direction === "up" ? index - 1 : index + 1;
-    if (index < 0 || swapIndex < 0 || swapIndex >= orderedIds.length) {
-      return { ok: true };
-    }
-    [orderedIds[index], orderedIds[swapIndex]] = [
-      orderedIds[swapIndex],
-      orderedIds[index],
-    ];
-    await renumberCategoryCardPositions(context.category, orderedIds);
-    return { ok: true };
+    return reorderCategoryRootCard(cardId, context.category, direction);
   }
 
   const rows = await db

@@ -24,6 +24,7 @@ export default function QueueTab() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [rejectConfirmOpen, setRejectConfirmOpen] = useState(false);
+  const [acceptAllConfirmOpen, setAcceptAllConfirmOpen] = useState(false);
   const [toast, setToast] = useState<{ open: boolean; message: string }>({
     open: false,
     message: "",
@@ -136,7 +137,16 @@ export default function QueueTab() {
       setToast({ open: true, message: data.error ?? "Failed to accept card." });
       return;
     }
-    setToast({ open: true, message: "Card accepted and added to database." });
+    const data = (await response.json()) as {
+      mergedIntoExisting?: boolean;
+      targetId?: string;
+    };
+    setToast({
+      open: true,
+      message: data.mergedIntoExisting
+        ? `Duplicate URL — merged into existing card (${data.targetId ?? "unknown"}).`
+        : "Card accepted and added to database.",
+    });
     await fetchQueue();
   };
 
@@ -151,6 +161,42 @@ export default function QueueTab() {
     }
     setRejectConfirmOpen(false);
     setToast({ open: true, message: "Card rejected." });
+    await fetchQueue();
+  };
+
+  const handleAcceptAllConfirm = async () => {
+    setActing(true);
+    const response = await fetch("/api/queue/accept-all", { method: "POST" });
+    setActing(false);
+    if (!response.ok) {
+      const data = (await response.json()) as { error?: string };
+      setToast({
+        open: true,
+        message: data.error ?? "Failed to accept queued cards.",
+      });
+      return;
+    }
+    const data = (await response.json()) as {
+      accepted?: number;
+      merged?: number;
+      skipped?: number;
+      failed?: number;
+    };
+    setAcceptAllConfirmOpen(false);
+    const parts = [
+      `${data.accepted ?? 0} accepted`,
+      `${data.merged ?? 0} merged`,
+    ];
+    if ((data.skipped ?? 0) > 0) {
+      parts.push(`${data.skipped} skipped`);
+    }
+    if ((data.failed ?? 0) > 0) {
+      parts.push(`${data.failed} failed`);
+    }
+    setToast({
+      open: true,
+      message: `Bulk accept complete: ${parts.join(", ")}.`,
+    });
     await fetchQueue();
   };
 
@@ -179,12 +225,24 @@ export default function QueueTab() {
     <Stack spacing={3}>
       <Stack
         direction="row"
-        sx={{ justifyContent: "space-between", alignItems: "center" }}
+        sx={{ justifyContent: "space-between", alignItems: "center", gap: 2, flexWrap: "wrap" }}
       >
         <Typography variant="h5">Queue</Typography>
-        <Typography color="text.secondary">
-          {index + 1} of {queue.length}
-        </Typography>
+        <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+          <Typography color="text.secondary">
+            {index + 1} of {queue.length}
+          </Typography>
+          {queue.length > 1 && (
+            <Button
+              variant="contained"
+              color="success"
+              onClick={() => setAcceptAllConfirmOpen(true)}
+              disabled={acting}
+            >
+              Accept All
+            </Button>
+          )}
+        </Stack>
       </Stack>
 
       <Paper sx={{ p: 3 }}>
@@ -265,6 +323,17 @@ export default function QueueTab() {
           Skip
         </Button>
       </Box>
+
+      <ConfirmDialog
+        open={acceptAllConfirmOpen}
+        title="Accept all queued cards?"
+        message={`Accept all ${queue.length} cards in the queue using their saved details? Unsaved edits on the current card are not included. Cards missing a title, URL, or placement will be skipped.`}
+        confirmLabel="Accept All"
+        confirmColor="success"
+        onConfirm={handleAcceptAllConfirm}
+        onCancel={() => setAcceptAllConfirmOpen(false)}
+        loading={acting}
+      />
 
       <ConfirmDialog
         open={rejectConfirmOpen}
