@@ -117,10 +117,34 @@ type CategoryTimelineItem =
   | { kind: "card"; id: string; position: number }
   | { kind: "playlist"; id: string; position: number };
 
+const getCategoryRootCardIds = async (
+  category: CategorySlug,
+): Promise<Set<string>> => {
+  const rows = await db
+    .select({ cardId: cardCategories.cardId })
+    .from(cardCategories)
+    .where(eq(cardCategories.categorySlug, category));
+
+  if (rows.length === 0) {
+    return new Set();
+  }
+
+  const inCategoryPlaylist = await db
+    .select({ cardId: playlistCards.cardId })
+    .from(playlistCards)
+    .innerJoin(playlists, eq(playlistCards.playlistId, playlists.id))
+    .where(eq(playlists.categorySlug, category));
+
+  const excluded = new Set(inCategoryPlaylist.map((row) => row.cardId));
+  return new Set(
+    rows.map((row) => row.cardId).filter((cardId) => !excluded.has(cardId)),
+  );
+};
+
 const getCategoryTimeline = async (
   category: CategorySlug,
 ): Promise<CategoryTimelineItem[]> => {
-  const [cardRows, playlistRows] = await Promise.all([
+  const [cardRows, playlistRows, rootCardIds] = await Promise.all([
     db
       .select({
         id: cardCategories.cardId,
@@ -140,14 +164,17 @@ const getCategoryTimeline = async (
           isNull(playlists.parentPlaylistId),
         ),
       ),
+    getCategoryRootCardIds(category),
   ]);
 
   const entries: CategoryTimelineItem[] = [
-    ...cardRows.map((row) => ({
-      kind: "card" as const,
-      id: row.id,
-      position: row.position,
-    })),
+    ...cardRows
+      .filter((row) => rootCardIds.has(row.id))
+      .map((row) => ({
+        kind: "card" as const,
+        id: row.id,
+        position: row.position,
+      })),
     ...playlistRows.map((row) => ({
       kind: "playlist" as const,
       id: row.id,
@@ -191,11 +218,107 @@ export const setCategoryTimelineOrder = async (
   category: CategorySlug,
   order: CategoryTimelineEntry[],
 ): Promise<{ ok: true } | { error: string }> => {
+  const rootCardIds = await getCategoryRootCardIds(category);
+  const categoryPlaylistIdSet = new Set(
+    (
+      await db
+        .select({ id: playlists.id })
+        .from(playlists)
+        .where(
+          and(
+            eq(playlists.categorySlug, category),
+            isNull(playlists.parentPlaylistId),
+          ),
+        )
+    ).map((row) => row.id),
+  );
+
+  for (const entry of order) {
+    if (entry.kind === "card" && !rootCardIds.has(entry.id)) {
+      return {
+        error:
+          "Only root cards (category without a playlist in that category) belong on the category layout.",
+      };
+    }
+    if (entry.kind === "playlist" && !categoryPlaylistIdSet.has(entry.id)) {
+      return { error: "Invalid playlist in category layout order." };
+    }
+  }
+
   const timeline: CategoryTimelineItem[] = order.map((entry, index) => ({
     ...entry,
     position: index,
   }));
   await renumberCategoryTimeline(category, timeline);
+  return { ok: true };
+};
+
+export const setCategoryCardOrder = async (
+  category: CategorySlug,
+  orderedCardIds: string[],
+): Promise<{ ok: true } | { error: string }> => {
+  if (orderedCardIds.length === 0) {
+    return { ok: true };
+  }
+  await renumberCategoryCardPositions(category, orderedCardIds);
+  return { ok: true };
+};
+
+export const setPlaylistSiblingOrder = async (
+  category: CategorySlug,
+  parentPlaylistId: string | undefined,
+  orderedPlaylistIds: string[],
+): Promise<{ ok: true } | { error: string }> => {
+  if (orderedPlaylistIds.length === 0) {
+    return { ok: true };
+  }
+
+  const siblingConditions = [eq(playlists.categorySlug, category)];
+  if (parentPlaylistId) {
+    siblingConditions.push(eq(playlists.parentPlaylistId, parentPlaylistId));
+  } else {
+    siblingConditions.push(isNull(playlists.parentPlaylistId));
+  }
+
+  const siblings = await db
+    .select({ id: playlists.id })
+    .from(playlists)
+    .where(and(...siblingConditions));
+
+  const siblingIds = new Set(siblings.map((row) => row.id));
+  if (
+    orderedPlaylistIds.length !== siblingIds.size ||
+    orderedPlaylistIds.some((id) => !siblingIds.has(id))
+  ) {
+    return { error: "Playlist order does not match sibling group." };
+  }
+
+  await renumberPlaylistPositions(orderedPlaylistIds);
+  return { ok: true };
+};
+
+export const setPlaylistCardOrder = async (
+  playlistId: string,
+  orderedCardIds: string[],
+): Promise<{ ok: true } | { error: string }> => {
+  if (orderedCardIds.length === 0) {
+    return { ok: true };
+  }
+
+  const rows = await db
+    .select({ cardId: playlistCards.cardId })
+    .from(playlistCards)
+    .where(eq(playlistCards.playlistId, playlistId));
+
+  const playlistCardIds = new Set(rows.map((row) => row.cardId));
+  if (
+    orderedCardIds.length !== playlistCardIds.size ||
+    orderedCardIds.some((id) => !playlistCardIds.has(id))
+  ) {
+    return { error: "Card order does not match playlist." };
+  }
+
+  await renumberPlaylistCardPositions(playlistId, orderedCardIds);
   return { ok: true };
 };
 

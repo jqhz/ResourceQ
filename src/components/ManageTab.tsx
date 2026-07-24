@@ -31,8 +31,10 @@ import { buildCategoryTimelineRows } from "@src/utils/categoryTimeline";
 import { searchCards } from "@src/utils/search";
 import { getNextIdForCategory, getNextPlaylistId } from "@src/utils/id";
 import CardModal, { emptyCard } from "./CardModal";
+import CardOrderTable from "./CardOrderTable";
 import CategoryTimelineTable from "./CategoryTimelineTable";
 import ConfirmDialog from "./ConfirmDialog";
+import PlaylistManagementTable from "./PlaylistManagementTable";
 import PlaylistModal, { emptyPlaylist } from "./PlaylistModal";
 
 export default function ManageTab() {
@@ -61,24 +63,38 @@ export default function ManageTab() {
     id: string;
     title: string;
   } | null>(null);
-  const [reordering, setReordering] = useState(false);
+  const [queuedCardIds, setQueuedCardIds] = useState<string[]>([]);
+  const [pendingCardIds, setPendingCardIds] = useState<string[]>([]);
+  const [savingOrder, setSavingOrder] = useState(false);
   const [toast, setToast] = useState<{ open: boolean; message: string }>({
     open: false,
     message: "",
   });
 
   const fetchContent = useCallback(async () => {
-    const response = await fetch("/api/cards", { cache: "no-store" });
-    if (!response.ok) {
+    const [cardsResponse, queueResponse] = await Promise.all([
+      fetch("/api/cards", { cache: "no-store" }),
+      fetch("/api/queue", { cache: "no-store" }),
+    ]);
+    if (!cardsResponse.ok) {
       setToast({ open: true, message: "Failed to load cards." });
       return;
     }
-    const data = (await response.json()) as {
+    const data = (await cardsResponse.json()) as {
       cards: CardItem[];
       playlists: Playlist[];
     };
     setCards(data.cards ?? []);
     setPlaylists(data.playlists ?? []);
+
+    if (queueResponse.ok) {
+      const queueData = (await queueResponse.json()) as { cards?: CardItem[] };
+      const ids = (queueData.cards ?? []).map((card) => card.id);
+      setQueuedCardIds(ids);
+      setPendingCardIds((current) =>
+        current.filter((id) => !ids.includes(id)),
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -112,6 +128,12 @@ export default function ManageTab() {
   );
 
   const reorderContext = useMemo((): ReorderContext | null => {
+    if (filter.startsWith("category-root:")) {
+      return {
+        type: "category",
+        category: filter.replace("category-root:", "") as CardItem["categories"][number],
+      };
+    }
     if (filter.startsWith("category:")) {
       return {
         type: "category",
@@ -127,17 +149,21 @@ export default function ManageTab() {
     return null;
   }, [filter]);
 
+  const categoryRootFilter = filter.startsWith("category-root:")
+    ? (filter.replace("category-root:", "") as CategorySlug)
+    : null;
+
   const categoryTimelineRows = useMemo(() => {
-    if (reorderContext?.type !== "category") {
+    if (!categoryRootFilter) {
       return [];
     }
 
     return buildCategoryTimelineRows(
-      reorderContext.category,
+      categoryRootFilter,
       activeCards,
       playlists,
     );
-  }, [activeCards, playlists, reorderContext]);
+  }, [activeCards, playlists, categoryRootFilter]);
 
   const filteredCategoryTimelineRows = useMemo(() => {
     const trimmed = searchQuery.trim().toLowerCase();
@@ -155,28 +181,14 @@ export default function ManageTab() {
     });
   }, [categoryTimelineRows, searchQuery]);
 
-  const playlistSiblingIndex = useMemo(() => {
-    const indexById = new Map<string, { index: number; count: number }>();
-    const groups = new Map<string, Playlist[]>();
-    for (const playlist of playlists) {
-      const key = `${playlist.category}::${playlist.parentPlaylistId ?? ""}`;
-      const group = groups.get(key) ?? [];
-      group.push(playlist);
-      groups.set(key, group);
-    }
-    for (const group of groups.values()) {
-      const sorted = [...group].sort(
-        (left, right) => left.position - right.position || left.id.localeCompare(right.id),
-      );
-      sorted.forEach((playlist, index) => {
-        indexById.set(playlist.id, { index, count: sorted.length });
-      });
-    }
-    return indexById;
-  }, [playlists]);
-
   const filteredByCategory = useMemo(() => {
     if (filter === "all") return activeCards;
+    if (filter.startsWith("category-root:")) {
+      const category = filter.replace("category-root:", "");
+      return activeCards.filter((card) =>
+        card.categories.includes(category as CardItem["categories"][number]),
+      );
+    }
     if (filter.startsWith("category:")) {
       const category = filter.replace("category:", "");
       return activeCards.filter((card) =>
@@ -198,7 +210,11 @@ export default function ManageTab() {
   const sortedDisplayedCards = useMemo(() => {
     const nextCards = [...displayedCards];
 
-    if (reorderContext?.type === "category") {
+    if (
+      reorderContext?.type === "category" &&
+      filter.startsWith("category:") &&
+      !filter.startsWith("category-root:")
+    ) {
       const category = reorderContext.category;
       nextCards.sort(
         (left, right) =>
@@ -229,7 +245,7 @@ export default function ManageTab() {
     });
 
     return nextCards;
-  }, [displayedCards, idSortOrder, reorderContext]);
+  }, [displayedCards, filter, idSortOrder, reorderContext]);
 
   const sortedArchivedCards = useMemo(
     () =>
@@ -259,6 +275,14 @@ export default function ManageTab() {
         </ListSubheader>,
       );
       options.push(
+        <MenuItem
+          key={`category-root-${category.slug}`}
+          value={`category-root:${category.slug}`}
+        >
+          {category.label} (Root)
+        </MenuItem>,
+      );
+      options.push(
         <MenuItem key={`category-${category.slug}`} value={`category:${category.slug}`}>
           {category.label} (All)
         </MenuItem>,
@@ -280,10 +304,19 @@ export default function ManageTab() {
     return options;
   }, [playlists]);
 
-  const existingIds = useMemo(
-    () => cards.map((card) => card.id),
-    [cards],
-  );
+  const existingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const card of cards) {
+      ids.add(card.id);
+    }
+    for (const id of queuedCardIds) {
+      ids.add(id);
+    }
+    for (const id of pendingCardIds) {
+      ids.add(id);
+    }
+    return [...ids];
+  }, [cards, pendingCardIds, queuedCardIds]);
 
   const existingPlaylistIds = useMemo(
     () => playlists.map((playlist) => playlist.id),
@@ -422,6 +455,11 @@ export default function ManageTab() {
       return;
     }
 
+    if (modalMode === "add") {
+      setPendingCardIds((current) =>
+        current.includes(draft.id) ? current : [...current, draft.id],
+      );
+    }
     setModalOpen(false);
     setToast({
       open: true,
@@ -474,65 +512,73 @@ export default function ManageTab() {
     await fetchContent();
   };
 
-  const handleReorderPlaylist = async (
-    playlistId: string,
-    direction: "up" | "down",
-  ) => {
-    setReordering(true);
+  const handleSavePlaylistGroupOrder = async (
+    category: CategorySlug,
+    parentPlaylistId: string | undefined,
+    order: string[],
+  ): Promise<boolean> => {
+    setSavingOrder(true);
     const response = await fetch("/api/reorder/playlists", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ playlistId, direction }),
+      body: JSON.stringify({
+        category,
+        parentPlaylistId,
+        order,
+      }),
     });
-    setReordering(false);
+    setSavingOrder(false);
     if (!response.ok) {
-      setToast({ open: true, message: "Failed to reorder playlist." });
-      return;
+      setToast({ open: true, message: "Failed to reorder playlists." });
+      return false;
     }
     await fetchContent();
+    return true;
   };
 
-  const handleCategoryTimelineReorder = async (
+  const handleCategoryTimelineSave = async (
     category: CategorySlug,
     order: { kind: "card" | "playlist"; id: string }[],
-  ) => {
-    setReordering(true);
+  ): Promise<boolean> => {
+    setSavingOrder(true);
     const response = await fetch("/api/reorder/category-timeline", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ category, order }),
     });
-    setReordering(false);
+    setSavingOrder(false);
     if (!response.ok) {
       setToast({ open: true, message: "Failed to reorder category layout." });
-      return;
+      return false;
     }
     await fetchContent();
+    return true;
   };
 
-  const handleReorderCard = async (
-    cardId: string,
-    direction: "up" | "down",
-  ) => {
-    if (!reorderContext) return;
-    setReordering(true);
+  const handleSaveCardOrder = async (orderedIds: string[]): Promise<boolean> => {
+    if (!reorderContext) return false;
+    setSavingOrder(true);
     const response = await fetch("/api/reorder/cards", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardId, direction, context: reorderContext }),
+      body: JSON.stringify({ order: orderedIds, context: reorderContext }),
     });
-    setReordering(false);
+    setSavingOrder(false);
     if (!response.ok) {
-      setToast({ open: true, message: "Failed to reorder card." });
-      return;
+      setToast({ open: true, message: "Failed to reorder cards." });
+      return false;
     }
     await fetchContent();
+    return true;
   };
 
-  const canReorderCards = reorderContext?.type === "playlist";
-  const showCategoryTimeline = reorderContext?.type === "category";
+  const showCategoryRootTimeline = categoryRootFilter !== null;
+  const showCategoryAllCards =
+    filter.startsWith("category:") && !filter.startsWith("category-root:");
+  const showPlaylistCardOrder = reorderContext?.type === "playlist";
+  const cardOrderDragEnabled = searchQuery.trim().length === 0;
   const categoryTimelineDragEnabled =
-    showCategoryTimeline && searchQuery.trim().length === 0;
+    showCategoryRootTimeline && searchQuery.trim().length === 0;
 
   return (
     <Stack spacing={3}>
@@ -556,98 +602,22 @@ export default function ManageTab() {
             Add Playlist
           </Button>
         </Stack>
-        <Box sx={{ overflowX: "auto" }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Title</TableCell>
-                <TableCell>Slug</TableCell>
-                <TableCell>ID</TableCell>
-                <TableCell>Category</TableCell>
-                <TableCell>Order</TableCell>
-                <TableCell>Image</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {playlists.map((playlist) => {
-                const sibling = playlistSiblingIndex.get(playlist.id);
-                return (
-                <TableRow
-                  key={playlist.id}
-                  hover
-                  sx={{ cursor: "pointer" }}
-                  onClick={() => openEditPlaylistModal(playlist)}
-                >
-                  <TableCell>{playlist.title}</TableCell>
-                  <TableCell>{playlist.slug}</TableCell>
-                  <TableCell>{playlist.id}</TableCell>
-                  <TableCell>
-                    {categoryLabel.get(playlist.category) ?? playlist.category}
-                  </TableCell>
-                  <TableCell onClick={(event) => event.stopPropagation()}>
-                    <Stack direction="row" spacing={0.5}>
-                      <Button
-                        size="small"
-                        disabled={
-                          reordering ||
-                          !sibling ||
-                          sibling.index === 0
-                        }
-                        onClick={() => handleReorderPlaylist(playlist.id, "up")}
-                        aria-label="Move playlist up"
-                      >
-                        <ArrowUpwardIcon fontSize="small" />
-                      </Button>
-                      <Button
-                        size="small"
-                        disabled={
-                          reordering ||
-                          !sibling ||
-                          sibling.index >= sibling.count - 1
-                        }
-                        onClick={() => handleReorderPlaylist(playlist.id, "down")}
-                        aria-label="Move playlist down"
-                      >
-                        <ArrowDownwardIcon fontSize="small" />
-                      </Button>
-                    </Stack>
-                  </TableCell>
-                  <TableCell sx={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {playlist.image}
-                  </TableCell>
-                  <TableCell align="right" onClick={(event) => event.stopPropagation()}>
-                    <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
-                      <Button size="small" onClick={() => openEditPlaylistModal(playlist)}>
-                        Edit
-                      </Button>
-                      <Button
-                        size="small"
-                        color="error"
-                        onClick={() =>
-                          setDeletePlaylistTarget({
-                            id: playlist.id,
-                            title: playlist.title,
-                          })
-                        }
-                      >
-                        Delete
-                      </Button>
-                    </Stack>
-                  </TableCell>
-                </TableRow>
-              );
-              })}
-              {playlists.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7}>
-                    <Typography color="text.secondary">No playlists found.</Typography>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Box>
+        <Typography variant="body2" color="text.secondary">
+          Drag playlists to reorder within their sibling group (same category and
+          parent). Click Save order when finished.
+        </Typography>
+        <PlaylistManagementTable
+          playlists={playlists}
+          savingOrder={savingOrder}
+          onSaveGroupOrder={handleSavePlaylistGroupOrder}
+          onEditPlaylist={openEditPlaylistModal}
+          onDeletePlaylist={(playlist) =>
+            setDeletePlaylistTarget({
+              id: playlist.id,
+              title: playlist.title,
+            })
+          }
+        />
       </Stack>
 
       <Divider />
@@ -670,17 +640,18 @@ export default function ManageTab() {
           </TextField>
         </Stack>
 
-        {showCategoryTimeline && (
+        {showCategoryRootTimeline && (
           <Typography variant="body2" color="text.secondary">
-            This list matches the public category page: root cards and playlist
-            sections share one order. Drag rows to reorder. Search temporarily
-            disables drag so you can edit matches.
+            Root layout: cards assigned to this category but not to any playlist
+            in this category, plus top-level playlist sections. Drag rows, then Save
+            order. Search temporarily disables drag.
           </Typography>
         )}
 
-        {canReorderCards && (
+        {(showCategoryAllCards || showPlaylistCardOrder) && (
           <Typography variant="body2" color="text.secondary">
-            Reorder cards within this playlist using the arrows in the Order column.
+            Drag cards to reorder, then click Save order. Search temporarily disables
+            drag.
           </Typography>
         )}
 
@@ -741,18 +712,30 @@ export default function ManageTab() {
         </Stack>
       </Stack>
 
-      {showCategoryTimeline ? (
+      {showCategoryRootTimeline && categoryRootFilter ? (
         <CategoryTimelineTable
-          category={reorderContext.category}
+          category={categoryRootFilter}
           rows={filteredCategoryTimelineRows}
           categoryLabel={categoryLabel}
           playlistMap={playlistMap}
-          reordering={reordering}
+          savingOrder={savingOrder}
           dragEnabled={categoryTimelineDragEnabled}
-          onReorder={handleCategoryTimelineReorder}
+          onSaveOrder={handleCategoryTimelineSave}
           onEditCard={(row) => openEditModal(row.card)}
           onEditPlaylist={(row) => openEditPlaylistModal(row.playlist)}
           onArchiveCard={(row) => handleArchiveToggle(row.card, true)}
+          onDeleteCard={requestDelete}
+        />
+      ) : showCategoryAllCards || showPlaylistCardOrder ? (
+        <CardOrderTable
+          cards={sortedDisplayedCards}
+          categoryLabel={categoryLabel}
+          playlistMap={playlistMap}
+          dragEnabled={cardOrderDragEnabled}
+          savingOrder={savingOrder}
+          onSaveOrder={handleSaveCardOrder}
+          onEditCard={openEditModal}
+          onArchiveCard={(card) => handleArchiveToggle(card, true)}
           onDeleteCard={requestDelete}
         />
       ) : (
@@ -783,15 +766,15 @@ export default function ManageTab() {
                   ID
                 </Button>
               </TableCell>
+              <TableCell>Recommended</TableCell>
               <TableCell>Categories</TableCell>
               <TableCell>Playlists</TableCell>
               <TableCell>URL</TableCell>
-              {canReorderCards && <TableCell>Order</TableCell>}
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {sortedDisplayedCards.map((card, index) => (
+            {sortedDisplayedCards.map((card) => (
               <TableRow
                 key={card.id}
                 hover
@@ -800,6 +783,13 @@ export default function ManageTab() {
               >
                 <TableCell>{card.title}</TableCell>
                 <TableCell>{card.id}</TableCell>
+                <TableCell>
+                  {card.recommended ? (
+                    <Chip label="Yes" size="small" color="secondary" />
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
                 <TableCell>
                   <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
                     {card.categories.map((slug) => (
@@ -831,30 +821,6 @@ export default function ManageTab() {
                 <TableCell sx={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}>
                   {card.url}
                 </TableCell>
-                {canReorderCards && (
-                  <TableCell onClick={(event) => event.stopPropagation()}>
-                    <Stack direction="row" spacing={0.5}>
-                      <Button
-                        size="small"
-                        disabled={reordering || index === 0}
-                        onClick={() => handleReorderCard(card.id, "up")}
-                        aria-label="Move card up"
-                      >
-                        <ArrowUpwardIcon fontSize="small" />
-                      </Button>
-                      <Button
-                        size="small"
-                        disabled={
-                          reordering || index === sortedDisplayedCards.length - 1
-                        }
-                        onClick={() => handleReorderCard(card.id, "down")}
-                        aria-label="Move card down"
-                      >
-                        <ArrowDownwardIcon fontSize="small" />
-                      </Button>
-                    </Stack>
-                  </TableCell>
-                )}
                 <TableCell align="right" onClick={(event) => event.stopPropagation()}>
                   <Stack
                     direction="row"
@@ -883,7 +849,7 @@ export default function ManageTab() {
             ))}
             {sortedDisplayedCards.length === 0 && (
               <TableRow>
-                <TableCell colSpan={canReorderCards ? 7 : 6}>
+                <TableCell colSpan={7}>
                   <Typography color="text.secondary">No cards found.</Typography>
                 </TableCell>
               </TableRow>

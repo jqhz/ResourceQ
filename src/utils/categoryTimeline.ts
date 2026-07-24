@@ -6,6 +6,27 @@ import type {
   Playlist,
 } from "./types";
 
+export const categoryPlaylistIds = (
+  playlists: Playlist[],
+  category: CategorySlug,
+) =>
+  new Set(
+    playlists.filter((playlist) => playlist.category === category).map((playlist) => playlist.id),
+  );
+
+/** In-category card that is not placed in any playlist belonging to this category. */
+export const isCategoryRootCard = (
+  card: Pick<CardItem, "categories" | "playlistIds">,
+  category: CategorySlug,
+  playlists: Playlist[],
+): boolean => {
+  if (!card.categories.includes(category)) {
+    return false;
+  }
+  const playlistIdsInCategory = categoryPlaylistIds(playlists, category);
+  return !card.playlistIds.some((playlistId) => playlistIdsInCategory.has(playlistId));
+};
+
 export const buildCategoryTimelineRows = (
   category: CategorySlug,
   cards: CardItem[],
@@ -13,7 +34,7 @@ export const buildCategoryTimelineRows = (
 ): CategoryTimelineRow[] => {
   const rows: CategoryTimelineRow[] = [
     ...cards
-      .filter((card) => card.categories.includes(category))
+      .filter((card) => isCategoryRootCard(card, category, playlists))
       .map((card) => ({
         kind: "card" as const,
         id: card.id,
