@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -22,6 +22,7 @@ interface CardOrderTableProps {
   playlistMap: Map<string, string>;
   dragEnabled: boolean;
   savingOrder: boolean;
+  orderNotice?: ReactNode;
   onSaveOrder: (orderedIds: string[]) => Promise<boolean>;
   onEditCard: (card: CardItem) => void;
   onArchiveCard: (card: CardItem) => void;
@@ -34,6 +35,7 @@ export default function CardOrderTable({
   playlistMap,
   dragEnabled,
   savingOrder,
+  orderNotice,
   onSaveOrder,
   onEditCard,
   onArchiveCard,
@@ -58,6 +60,7 @@ export default function CardOrderTable({
 
   return (
     <Stack spacing={1}>
+      {orderNotice}
       {dirty && (
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <Typography variant="body2" color="warning.main">

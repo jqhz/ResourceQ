@@ -30,6 +30,7 @@ import { CATEGORIES } from "@src/utils/constants";
 import { buildCategoryTimelineRows } from "@src/utils/categoryTimeline";
 import { searchCards } from "@src/utils/search";
 import { getNextIdForCategory, getNextPlaylistId } from "@src/utils/id";
+import { readResponseError } from "@src/utils/api";
 import CardModal, { emptyCard } from "./CardModal";
 import CardOrderTable from "./CardOrderTable";
 import CategoryTimelineTable from "./CategoryTimelineTable";
@@ -529,7 +530,10 @@ export default function ManageTab() {
     });
     setSavingOrder(false);
     if (!response.ok) {
-      setToast({ open: true, message: "Failed to reorder playlists." });
+      setToast({
+        open: true,
+        message: await readResponseError(response, "Failed to reorder playlists."),
+      });
       return false;
     }
     await fetchContent();
@@ -548,7 +552,13 @@ export default function ManageTab() {
     });
     setSavingOrder(false);
     if (!response.ok) {
-      setToast({ open: true, message: "Failed to reorder category layout." });
+      setToast({
+        open: true,
+        message: await readResponseError(
+          response,
+          "Failed to reorder category layout.",
+        ),
+      });
       return false;
     }
     await fetchContent();
@@ -565,7 +575,10 @@ export default function ManageTab() {
     });
     setSavingOrder(false);
     if (!response.ok) {
-      setToast({ open: true, message: "Failed to reorder cards." });
+      setToast({
+        open: true,
+        message: await readResponseError(response, "Failed to reorder cards."),
+      });
       return false;
     }
     await fetchContent();
@@ -576,6 +589,46 @@ export default function ManageTab() {
   const showCategoryAllCards =
     filter.startsWith("category:") && !filter.startsWith("category-root:");
   const showPlaylistCardOrder = reorderContext?.type === "playlist";
+  const playlistFilterId = filter.startsWith("playlist:")
+    ? filter.replace("playlist:", "")
+    : null;
+
+  const archivedCardsHiddenFromOrder = useMemo(() => {
+    if (playlistFilterId) {
+      return archivedCards.filter((card) =>
+        card.playlistIds.includes(playlistFilterId),
+      );
+    }
+    if (
+      showCategoryAllCards &&
+      reorderContext?.type === "category"
+    ) {
+      return archivedCards.filter((card) =>
+        card.categories.includes(reorderContext.category),
+      );
+    }
+    return [];
+  }, [
+    archivedCards,
+    playlistFilterId,
+    reorderContext,
+    showCategoryAllCards,
+  ]);
+
+  const cardOrderNotice =
+    archivedCardsHiddenFromOrder.length > 0 ? (
+      <Alert severity="info">
+        {archivedCardsHiddenFromOrder.length} archived card
+        {archivedCardsHiddenFromOrder.length === 1 ? "" : "s"} in this list (
+        {archivedCardsHiddenFromOrder.map((card) => card.id).join(", ")}){" "}
+        {archivedCardsHiddenFromOrder.length === 1 ? "is" : "are"} hidden here.
+        Saving order updates only active cards; archived cards stay linked and
+        keep their order at the end. Restore them from Archived Cards below to
+        edit them in this view, or remove them from the playlist/category in
+        the card editor.
+      </Alert>
+    ) : null;
+
   const cardOrderDragEnabled = searchQuery.trim().length === 0;
   const categoryTimelineDragEnabled =
     showCategoryRootTimeline && searchQuery.trim().length === 0;
@@ -733,6 +786,7 @@ export default function ManageTab() {
           playlistMap={playlistMap}
           dragEnabled={cardOrderDragEnabled}
           savingOrder={savingOrder}
+          orderNotice={cardOrderNotice}
           onSaveOrder={handleSaveCardOrder}
           onEditCard={openEditModal}
           onArchiveCard={(card) => handleArchiveToggle(card, true)}
@@ -1001,7 +1055,10 @@ export default function ManageTab() {
 
       <Snackbar
         open={toast.open}
-        autoHideDuration={4000}
+        autoHideDuration={Math.min(
+          12000,
+          Math.max(4000, toast.message.length * 60),
+        )}
         onClose={() => setToast({ open: false, message: "" })}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >

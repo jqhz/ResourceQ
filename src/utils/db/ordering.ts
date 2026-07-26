@@ -2,10 +2,12 @@ import { and, asc, eq, isNull, max, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   cardCategories,
+  cards,
   playlistCards,
   playlists,
 } from "../schema";
 import type { CategorySlug, ReorderContext, CategoryTimelineEntry } from "../types";
+import { buildActiveOrderWithArchivedTail } from "../reorderValidation";
 
 export const nextPlaylistPosition = async (
   category: CategorySlug,
@@ -260,7 +262,31 @@ export const setCategoryCardOrder = async (
   if (orderedCardIds.length === 0) {
     return { ok: true };
   }
-  await renumberCategoryCardPositions(category, orderedCardIds);
+
+  const rows = await db
+    .select({
+      cardId: cardCategories.cardId,
+      position: cardCategories.position,
+      archived: cards.archived,
+    })
+    .from(cardCategories)
+    .innerJoin(cards, eq(cardCategories.cardId, cards.id))
+    .where(eq(cardCategories.categorySlug, category));
+
+  const merged = buildActiveOrderWithArchivedTail(
+    orderedCardIds,
+    rows.map((row) => ({
+      cardId: row.cardId,
+      position: row.position,
+      archived: row.archived,
+    })),
+    `category "${category}"`,
+  );
+  if ("error" in merged) {
+    return { error: merged.error };
+  }
+
+  await renumberCategoryCardPositions(category, merged.finalOrder);
   return { ok: true };
 };
 
@@ -290,7 +316,18 @@ export const setPlaylistSiblingOrder = async (
     orderedPlaylistIds.length !== siblingIds.size ||
     orderedPlaylistIds.some((id) => !siblingIds.has(id))
   ) {
-    return { error: "Playlist order does not match sibling group." };
+    const missing = [...siblingIds].filter((id) => !orderedPlaylistIds.includes(id));
+    const extra = orderedPlaylistIds.filter((id) => !siblingIds.has(id));
+    const parts: string[] = [];
+    if (missing.length > 0) {
+      parts.push(`missing: ${missing.join(", ")}`);
+    }
+    if (extra.length > 0) {
+      parts.push(`unknown: ${extra.join(", ")}`);
+    }
+    return {
+      error: `Playlist order does not match this sibling group (${parts.join("; ")}). Refresh and try again.`,
+    };
   }
 
   await renumberPlaylistPositions(orderedPlaylistIds);
@@ -305,20 +342,40 @@ export const setPlaylistCardOrder = async (
     return { ok: true };
   }
 
-  const rows = await db
-    .select({ cardId: playlistCards.cardId })
-    .from(playlistCards)
-    .where(eq(playlistCards.playlistId, playlistId));
-
-  const playlistCardIds = new Set(rows.map((row) => row.cardId));
-  if (
-    orderedCardIds.length !== playlistCardIds.size ||
-    orderedCardIds.some((id) => !playlistCardIds.has(id))
-  ) {
-    return { error: "Card order does not match playlist." };
+  const [playlist] = await db
+    .select({ title: playlists.title })
+    .from(playlists)
+    .where(eq(playlists.id, playlistId))
+    .limit(1);
+  if (!playlist) {
+    return { error: `Playlist "${playlistId}" was not found.` };
   }
 
-  await renumberPlaylistCardPositions(playlistId, orderedCardIds);
+  const rows = await db
+    .select({
+      cardId: playlistCards.cardId,
+      position: playlistCards.position,
+      archived: cards.archived,
+    })
+    .from(playlistCards)
+    .innerJoin(cards, eq(playlistCards.cardId, cards.id))
+    .where(eq(playlistCards.playlistId, playlistId));
+
+  const scopeLabel = `playlist "${playlist.title}" (${playlistId})`;
+  const merged = buildActiveOrderWithArchivedTail(
+    orderedCardIds,
+    rows.map((row) => ({
+      cardId: row.cardId,
+      position: row.position,
+      archived: row.archived,
+    })),
+    scopeLabel,
+  );
+  if ("error" in merged) {
+    return { error: merged.error };
+  }
+
+  await renumberPlaylistCardPositions(playlistId, merged.finalOrder);
   return { ok: true };
 };
 
